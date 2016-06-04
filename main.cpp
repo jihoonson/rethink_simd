@@ -29,14 +29,17 @@ auto gen_random(char *s, const int len) -> void {
 // schema: long, int, float, long, double, int, float, long, double, int, float, long, double, char(40), char[10], char(50), char[20] - 200 bytes
 //            8   12     16    24      32   36     40    48      56   60     64    72      80       120       130       180       200
 
-const size_t RECORD_SIZE = 200;
+// schema: int, float - 8 bytes
+//         key  payload
+
+const size_t RECORD_SIZE = 8;
 const size_t OUT_BUFFER_SIZE = 4096;
 
 /*
  * Return a value of the key column
  */
-auto get_key(uint8_t* buf, const size_t offset) -> int32_t* {
-  return reinterpret_cast<int32_t *>(buf + offset);
+auto get_key(uint8_t* buf) -> int32_t* {
+  return reinterpret_cast<int32_t *>(buf); // + 8 for old schema
 }
 
 struct MMapFile {
@@ -93,7 +96,7 @@ auto scalar_branch(size_t input_num, double_t lower_bound, double_t upper_bound)
   size_t j = 0;
   for (size_t i = 0; i < input_num; i++) {
     uint8_t *p = &in->mm[i * RECORD_SIZE];
-    int32_t key = *get_key(p, 8);
+    int32_t key = *get_key(p);
 
     if (key >= lower_bound && key < upper_bound) {
       out = write_to_out(out, p);
@@ -118,7 +121,7 @@ auto scalar_branchless(size_t input_num, double_t lower_bound, double_t upper_bo
   size_t j = 0;
   for (size_t i = 0; i < input_num; i++) {
     uint8_t *p = &in->mm[i * RECORD_SIZE];
-    int32_t key = *get_key(p, 8);
+    int32_t key = *get_key(p);
 
     out = write_to_out(out, p);
     int m = (key >= lower_bound) & (key < upper_bound);
@@ -168,43 +171,51 @@ auto generate_file(size_t input_num) -> void {
 
   for (size_t idx = 0; idx < input_num; idx++) {
 
-    l = idis(gen);
-    memcpy(out, &l, 8);
-    out += 8;
+    i = idis(gen);
+    memcpy(out, &i, 4);
+    out += 4;
 
-    for (int k = 0; k < 3; k++) {
-      i = idis(gen);
-      memcpy(out, &i, 4);
-      out += 4;
+    f = fdis(gen);
+    memcpy(out, &f, 4);
+    out += 4;
 
-      f = fdis(gen);
-      memcpy(out, &f, 4);
-      out += 4;
-
-      l = idis(gen);
-      memcpy(out, &l, 8);
-      out += 8;
-
-      d = ddis(gen);
-      memcpy(out, &d, 8);
-      out += 8;
-    }
-
-    gen_random(ch, 40);
-    memcpy(out, ch, 40);
-    out += 40;
-
-    gen_random(ch, 10);
-    memcpy(out, ch, 10);
-    out += 10;
-
-    gen_random(ch, 50);
-    memcpy(out, ch, 50);
-    out += 50;
-
-    gen_random(ch, 20);
-    memcpy(out, ch, 20);
-    out += 20;
+//    l = idis(gen);
+//    memcpy(out, &l, 8);
+//    out += 8;
+//
+//    for (int k = 0; k < 3; k++) {
+//      i = idis(gen);
+//      memcpy(out, &i, 4);
+//      out += 4;
+//
+//      f = fdis(gen);
+//      memcpy(out, &f, 4);
+//      out += 4;
+//
+//      l = idis(gen);
+//      memcpy(out, &l, 8);
+//      out += 8;
+//
+//      d = ddis(gen);
+//      memcpy(out, &d, 8);
+//      out += 8;
+//    }
+//
+//    gen_random(ch, 40);
+//    memcpy(out, ch, 40);
+//    out += 40;
+//
+//    gen_random(ch, 10);
+//    memcpy(out, ch, 10);
+//    out += 10;
+//
+//    gen_random(ch, 50);
+//    memcpy(out, ch, 50);
+//    out += 50;
+//
+//    gen_random(ch, 20);
+//    memcpy(out, ch, 20);
+//    out += 20;
   }
 
   cout << "written size: " << (out - reinterpret_cast<uint8_t*>(result)) << endl;
