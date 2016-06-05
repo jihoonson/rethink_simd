@@ -9,6 +9,8 @@ namespace po = boost::program_options;
 
 using namespace std;
 
+#define PAYLOAD_SIZE = 4;
+
 const std::string META_FILE = "test.meta";
 const std::string KEY_FILE = "test.key";
 const std::string PAYLOAD_FILE = "test.payload";
@@ -18,8 +20,6 @@ const std::string PAYLOAD_FILE = "test.payload";
 
 // schema: int, float - 8 bytes
 //         key  payload
-
-const size_t OUT_BUFFER_SIZE = 4096;
 
 struct MMapFile {
   FILE* file;
@@ -82,8 +82,8 @@ struct ScalarContext {
     key_mm->release();
     payload_mm->release();
 
-    key_out = new int32_t[selectivity * input_num > 0 ? (size_t)ceil(selectivity * input_num) : 1];
-    payload_out = new float_t[selectivity * input_num > 0 ? (size_t)ceil(selectivity * input_num) : 1];
+    key_out = new int32_t[input_num];
+    payload_out = new float_t[input_num];
   }
 
   ~ScalarContext() {
@@ -121,7 +121,7 @@ auto scalar_branch(std::shared_ptr<ScalarContext> context) -> size_t {
 
     if (key >= lower_bound && key < upper_bound) {
       memcpy(&key_out[j], &key, 4);
-      memcpy(&payload_out[j], &payload_in[i], 4);
+      memcpy(&payload_out[j], &payload_in[i], PAYLOAD_SIZE);
       j++;
     }
   }
@@ -144,7 +144,7 @@ auto scalar_branchless(std::shared_ptr<ScalarContext> context) -> size_t {
     int32_t key = key_in[i];
 
     memcpy(&key_out[j], &key, 4);
-    memcpy(&payload_out[j], &payload_in[i], 4);
+    memcpy(&payload_out[j], &payload_in[i], PAYLOAD_SIZE);
     int m = (key >= lower_bound) & (key < upper_bound);
     j += m;
   }
@@ -169,12 +169,14 @@ auto generate_file(size_t input_num) -> void {
   FILE* key_file = fopen(KEY_FILE.c_str(), "w");
   FILE* payload_file = fopen(PAYLOAD_FILE.c_str(), "w");
 
-  size_t file_size = input_num * 4; // for float and int
-  cout << "file size: " << file_size << endl;
-  if (ftruncate(fileno(key_file), file_size) == -1) {
+  size_t key_file_size = input_num * 4; // for int
+  cout << "key file size: " << key_file_size << endl;
+  if (ftruncate(fileno(key_file), key_file_size) == -1) {
     cerr << errno << endl;
   }
-  if (ftruncate(fileno(payload_file), file_size) == -1) {
+  size_t payload_file_size = input_num * PAYLOAD_SIZE;
+  cout << "payload file size: " << payload_file_size << endl;
+  if (ftruncate(fileno(payload_file), payload_file_size) == -1) {
     cerr << errno << endl;
   }
   fclose(key_file);
@@ -185,13 +187,13 @@ auto generate_file(size_t input_num) -> void {
   fseek(key_file, 0L, SEEK_SET);
   fseek(payload_file, 0L, SEEK_SET);
 
-  void* key_mm = mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(key_file), 0);
+  void* key_mm = mmap(nullptr, key_file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(key_file), 0);
   if (key_mm == MAP_FAILED) {
     cerr << errno << endl;
   }
   uint8_t* key_out = reinterpret_cast<uint8_t*>(key_mm);
 
-  void* payload_mm = mmap(nullptr, file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(payload_file), 0);
+  void* payload_mm = mmap(nullptr, payload_file_size, PROT_READ | PROT_WRITE, MAP_SHARED, fileno(payload_file), 0);
   if (payload_mm == MAP_FAILED) {
     cerr << errno << endl;
   }
@@ -211,8 +213,8 @@ auto generate_file(size_t input_num) -> void {
   cout << "written key: " << (key_out - reinterpret_cast<uint8_t*>(key_mm)) << endl;
   cout << "written payload: " << (payload_out - reinterpret_cast<uint8_t*>(payload_mm)) << endl;
 
-  munmap(key_mm, file_size);
-  munmap(payload_mm, file_size);
+  munmap(key_mm, key_file_size);
+  munmap(payload_mm, payload_file_size);
   fclose(key_file);
   fclose(payload_file);
 };
@@ -260,7 +262,7 @@ auto main(const int argc, char *argv[]) -> int32_t {
     auto end = chrono::steady_clock::now();
     auto diff = end - start;
     cout << "Done! " << chrono::duration <double, milli> (diff).count() << " ms" << endl;
-    
+
     cout << "# of outputs: " << (out_num) << endl;
     cout << "selectivity: " << (out_num * 100 / (double_t)context->input_num) << "%\n";
 
