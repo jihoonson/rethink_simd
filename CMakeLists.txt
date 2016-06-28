@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.4.1)
 project(rethink_simd)
 
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3 -mavx2")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -mavx2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -O3 -mavx2")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -mavx2")
 
 message(STATUS "${CMAKE_CXX_FLAGS}")
 

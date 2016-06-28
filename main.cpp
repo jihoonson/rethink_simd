@@ -180,8 +180,8 @@ static void printvi128(const char * label, __m128i v)
   printf("%s = %d %d %d %d\n", label, a[0],  a[1],  a[2],  a[3]);
 }
 
-//static const size_t RID_BUF_SIZE = 65536;
-static const size_t RID_BUF_SIZE = 16;
+static const size_t RID_BUF_SIZE = 65536;
+//static const size_t RID_BUF_SIZE = 16;
 
 auto prepare_perm_mat(__m128i* perm) -> __m128i* {
   for (uint16_t i = 0; i < 256; i++) {
@@ -357,8 +357,7 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
 
   // flush remaining items in the buffer
   size_t b = 0;
-  for (b = 0; b + 8 < RID_BUF_SIZE; b += 8) {
-//    cout << "flush2\n";
+  for (b = 0; b + 8 < buf_idx; b += 8) {
     // dereference column values and store
     __m256i ptr = _mm256_load_si256(reinterpret_cast<__m256i*>(&rid_buf[b]));
     __m256i key = _mm256_i32gather_epi32(key_in, ptr, 4);
@@ -375,7 +374,7 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
 
   // flush remaining items in the buffer
   uint32_t mask_arr[8] = {0};
-  for (int i = 0; i < RID_BUF_SIZE - b; i++) {
+  for (int i = 0; i < buf_idx - b; i++) {
     mask_arr[i] = 0xFFFFFFFF;
   }
   __m256i remain_mask = _mm256_set_epi32(mask_arr[7], mask_arr[6], mask_arr[5], mask_arr[4], mask_arr[3], mask_arr[2], mask_arr[1], mask_arr[0]);
