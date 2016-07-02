@@ -180,8 +180,7 @@ static void printvi128(const char * label, __m128i v)
   printf("%s = %d %d %d %d\n", label, a[0],  a[1],  a[2],  a[3]);
 }
 
-static const size_t RID_BUF_SIZE = 65536;
-//static const size_t RID_BUF_SIZE = 16;
+static const size_t RID_BUF_SIZE = 4 * 1024 * 1024 / 4;
 
 auto prepare_perm_mat(__m128i* perm) -> __m128i* {
   for (uint16_t i = 0; i < 256; i++) {
@@ -210,70 +209,40 @@ auto prepare_perm_mat(__m128i* perm) -> __m128i* {
   return perm;
 }
 
-auto perform_vector(__m256i rid, __m128i *perm_mat, __m256i key, __m256 lb, __m256 ub, int32_t* rid_buf, size_t& buf_idx, size_t& buf_start_idx,
+auto perform_vector(__m256i rid, __m128i *perm_mat, __m256i key, __m256 lb, __m256 ub,
+                    int32_t* rid_buf, size_t& buf_idx, size_t& buf_start_idx,
                     int32_t* key_in, float_t* payload_in, int32_t* key_out, float_t* payload_out) -> void {
+
   __m256 cvt_key = _mm256_cvtepi32_ps(key);
-//  printvs("key", cvt_key);
 
   // Unordered compare checks that either inputs are NaN or not. Ordered compare checks that neither inputs are NaN.
-  __m256 lb_cmp = _mm256_cmp_ps(lb, cvt_key, _CMP_NGT_US); // If lb is less than key, result is 0xFFFF. Otherwise, 0.
-//  printvi256("lb_cmp", _mm256_cvtps_epi32(lb_cmp));
-
+  __m256 lb_cmp = _mm256_cmp_ps(lb, cvt_key, _CMP_NGT_US); // If lb is less than key, result is 0xFFFFFFFF. Otherwise, 0.
   __m256 ub_cmp = _mm256_cmp_ps(cvt_key, ub, _CMP_NGE_US);
-//  printvi256("ub_cmp", _mm256_cvtps_epi32(ub_cmp));
-
   __m256 cmp = _mm256_and_ps(lb_cmp, ub_cmp); // if any element is 0xFFFFFFFF, then key satisfies the predicates.
-//  printvi256("cmp", _mm256_cvtps_epi32(cmp));
 
   __mmask8 mask = (__mmask8) _mm256_movemask_ps(cmp);
 
-//  cout << "mask: " << _mm256_movemask_ps(cmp) << endl;
-
   if (mask > 0 /* if any bit is set */) {
-//    cout << "found\n";
-
     // selective store
 //      __m128i perm_comp = _mm_loadl_epi64(&perm_mat[mask]);
     __m128i perm_comp = perm_mat[mask];
-//    printvi128("perm_comp", perm_comp);
-
     __m256i perm = _mm256_cvtepi16_epi32(perm_comp);
-
-//    printvi256("perm", perm);
 
     // permute and store the input pointers
     __m256i cvt_cmp = _mm256_cvtps_epi32(cmp);
-//    printvi256("cvt_cmp", cvt_cmp);
-
     cvt_cmp = _mm256_permutevar8x32_epi32(cvt_cmp, perm);
-//    printvi256("cvt_cmp", cvt_cmp);
-
-//    printvi256("rid", rid);
     __m256i ptr = _mm256_permutevar8x32_epi32(rid, perm);
-//    printvi256("ptr", ptr);
 
     _mm256_maskstore_epi32(&rid_buf[buf_idx], cvt_cmp, ptr);
-
-//    int a = (int) _mm_popcnt_u64(mask);
-//    cout << "popcnt: " << a << endl;
-
-//    for (int aaa = 0; aaa < a; aaa++) {
-//      cout << rid_buf[aaa + buf_idx] << " ";
-//    }
-//
-//    cout << "\n";
 
     buf_idx += _mm_popcnt_u64(mask);
 
     // if the buffer is full, flush the buffer
     if (buf_idx + 8 > RID_BUF_SIZE) {
-//      cout << "flush\n";
       size_t b;
-      for (b = 0; b + 8 < RID_BUF_SIZE; b += 8) {
+      for (b = 0; b + 8 < buf_idx; b += 8) {
         // dereference column values and store
         __m256i load_ptr = _mm256_load_si256(reinterpret_cast<__m256i*>(&rid_buf[b]));
-//        int32_t a[8];
-//        _mm256_maskstore_epi32(a, _m256_mask, load_ptr);
         __m256i gather_key = _mm256_i32gather_epi32(key_in, load_ptr, 4);
         __m256 gather_pay = _mm256_i32gather_ps(payload_in, load_ptr, 4);
 
@@ -290,6 +259,7 @@ auto perform_vector(__m256i rid, __m128i *perm_mat, __m256i key, __m256 lb, __m2
       buf_idx -= b;
     }
   }
+
 }
 
 auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
@@ -319,17 +289,12 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
   __m256 lb = _mm256_broadcast_ss(&lower_bound);
   __m256 ub = _mm256_broadcast_ss(&upper_bound);
 
-//  cout << lower_bound << ", " << upper_bound << endl;
-//  printvs("lb ", lb);
-//  printvs("ub ", ub);
-//
-//  cout << endl;
-
   int32_t rid_buf[RID_BUF_SIZE]; // TODO: should be cache resident
   size_t buf_idx = 0;
   size_t buf_start_idx = 0;
-  __m256i rid = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
-  const __m256i eight = _mm256_set_epi32(8, 8, 8, 8, 8, 8, 8, 8);
+
+  __m256i v_rid = _mm256_set_epi32(7, 6, 5, 4, 3, 2, 1, 0);
+  const __m256i v_eight = _mm256_set_epi32(8, 8, 8, 8, 8, 8, 8, 8);
 
   const size_t remain_iter = input_num % 8;
   const size_t max_iter = input_num - remain_iter;
@@ -337,23 +302,24 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
   __m128i perm_mat[256];
   prepare_perm_mat(perm_mat);
 
-  size_t i;
-  for (i = 0; i < max_iter; i += 8) {
-    __m256i key = _mm256_load_si256(reinterpret_cast<__m256i*>(&key_in[i]));
-    perform_vector(rid, perm_mat, key, lb, ub, rid_buf, buf_idx, buf_start_idx, key_in, payload_in, key_out, payload_out);
+//  cout << "buf_start_idx: " << buf_start_idx << " buf_idx: " << buf_idx << endl;
+  size_t rid;
+  for (rid = 0; rid < max_iter; rid += 8) {
+    __m256i v_key = _mm256_load_si256(reinterpret_cast<__m256i*>(&key_in[rid]));
+    perform_vector(v_rid, perm_mat, v_key, lb, ub, rid_buf, buf_idx, buf_start_idx, key_in, payload_in, key_out, payload_out);
 
-    rid = _mm256_add_epi32(rid, eight);
+    v_rid = _mm256_add_epi32(v_rid, v_eight);
   }
 
   // evaluate remaining keys
-  // TODO: use maskload
   int32_t remain_key_arr[8] = {-1};
-  for (int r = 0; r < remain_iter; r++) {
-    remain_key_arr[r] = key_in[i + r];
+  for (int i = 0; i < remain_iter; i++) {
+    remain_key_arr[i] = key_in[rid + i];
   }
   __m256i remain_key = _mm256_set_epi32(remain_key_arr[7], remain_key_arr[6], remain_key_arr[5], remain_key_arr[4],
                                         remain_key_arr[3], remain_key_arr[2], remain_key_arr[1], remain_key_arr[0]);
-  perform_vector(rid, perm_mat, remain_key, lb, ub, rid_buf, buf_idx, buf_start_idx, key_in, payload_in, key_out, payload_out);
+  // TODO: mask?
+  perform_vector(v_rid, perm_mat, remain_key, lb, ub, rid_buf, buf_idx, buf_start_idx, key_in, payload_in, key_out, payload_out);
 
   // flush remaining items in the buffer
   size_t b = 0;
@@ -363,30 +329,22 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
     __m256i key = _mm256_i32gather_epi32(key_in, ptr, 4);
     __m256 pay = _mm256_i32gather_ps(payload_in, ptr, 4);
 
-//    printvi256("ptr", ptr);
-//    printvi256("key", key);
-//    printvs("pay", pay);
-
     // streaming store
     _mm256_stream_si256(reinterpret_cast<__m256i*>(&key_out[b + buf_start_idx]), key);
     _mm256_stream_ps(&payload_out[b + buf_start_idx], pay);
   }
 
   // flush remaining items in the buffer
-  uint32_t mask_arr[8] = {0};
+  uint32_t v_mask[8] = {0};
   for (int i = 0; i < buf_idx - b; i++) {
-    mask_arr[i] = 0xFFFFFFFF;
+    v_mask[i] = 0xFFFFFFFF;
   }
-  __m256i remain_mask = _mm256_set_epi32(mask_arr[7], mask_arr[6], mask_arr[5], mask_arr[4], mask_arr[3], mask_arr[2], mask_arr[1], mask_arr[0]);
-  __m256i zero = _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 0);
+  __m256i remain_mask = _mm256_set_epi32(v_mask[7], v_mask[6], v_mask[5], v_mask[4], v_mask[3], v_mask[2], v_mask[1], v_mask[0]);
+  const __m256i zero = _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, 0);
 
   __m256i ptr = _mm256_maskload_epi32(&rid_buf[b], remain_mask);
   __m256i key = _mm256_mask_i32gather_epi32(zero, key_in, ptr, remain_mask, 4);
   __m256 pay = _mm256_mask_i32gather_ps(zero, payload_in, ptr, remain_mask, 4);
-
-//  printvi256("ptr", ptr);
-//  printvi256("key", key);
-//  printvs("pay", pay);
 
   _mm256_maskstore_epi32(&key_out[b + buf_start_idx], remain_mask, key);
   _mm256_maskstore_ps(&payload_out[b + buf_start_idx], remain_mask, pay);
