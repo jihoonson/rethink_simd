@@ -124,8 +124,8 @@ auto scalar_branch(std::shared_ptr<ScalarContext> context) -> size_t {
     int32_t key = key_in[i];
 
     if (key >= lower_bound && key < upper_bound) {
-      memcpy(&key_out[j], &key, 4);
-      memcpy(&payload_out[j], &payload_in[i], PAYLOAD_SIZE);
+      key_out[j] = key;
+      payload_out[j] = payload_in[i];
       j++;
     }
   }
@@ -147,8 +147,8 @@ auto scalar_branchless(std::shared_ptr<ScalarContext> context) -> size_t {
   for (size_t i = 0; i < input_num; i++) {
     int32_t key = key_in[i];
 
-    memcpy(&key_out[j], &key, 4);
-    memcpy(&payload_out[j], &payload_in[i], PAYLOAD_SIZE);
+    key_out[j] = key;
+    payload_out[j] = payload_in[i];
     int m = (key >= lower_bound ? 1 : 0) & (key < upper_bound ? 1 : 0);
     j += m;
   }
