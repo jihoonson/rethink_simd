@@ -28,7 +28,7 @@ const std::string PAYLOAD_FILE = "test.payload";
 struct MMapFile {
   FILE* file;
   uint8_t* mm;
-  size_t file_size;
+  int64_t file_size;
 
   auto release() -> void {
     munmap(mm, file_size);
@@ -52,6 +52,7 @@ auto read_file(std::string file_name) -> std::shared_ptr<MMapFile> {
   mm_file->file = fopen(file_name.c_str(), "rb");
   fseek(mm_file->file, 0L, SEEK_END);
   mm_file->file_size = ftell(mm_file->file);
+  fseek(mm_file->file, 0L, SEEK_SET);
 
   void* result = mmap(nullptr, mm_file->file_size, PROT_READ, MAP_SHARED, fileno(mm_file->file), 0);
   if (result == MAP_FAILED) {
@@ -73,26 +74,28 @@ struct ScalarContext {
     lower_bound = input_num / 2 - (input_num * selectivity / 2);
     upper_bound = input_num / 2 + (input_num * selectivity / 2);
 
-    std::shared_ptr<MMapFile> key_mm = read_file(data_dir + KEY_FILE);
-    std::shared_ptr<MMapFile> payload_mm = read_file(data_dir + PAYLOAD_FILE);
+    key_mm = read_file(data_dir + KEY_FILE);
+    payload_mm = read_file(data_dir + PAYLOAD_FILE);
 
-    key_in = new int32_t[input_num];
-    payload_in = new float_t[input_num];
+//    key_in = new int32_t[input_num];
+//    payload_in = new float_t[input_num];
 
     // Load whole data into memory
-    memcpy(key_in, key_mm->mm, key_mm->file_size);
-    memcpy(payload_in, payload_mm->mm, payload_mm->file_size);
+//    memcpy(key_in, key_mm->mm, key_mm->file_size);
+//    memcpy(payload_in, payload_mm->mm, payload_mm->file_size);
 
-    key_mm->release();
-    payload_mm->release();
+//    key_mm->release();
+//    payload_mm->release();
 
     key_out = new int32_t[input_num];
     payload_out = new float_t[input_num];
   }
 
   ~ScalarContext() {
-    delete [] payload_in;
-    delete [] key_in;
+//    delete [] payload_in;
+//    delete [] key_in;
+    key_mm->release();
+    payload_mm->release();
     delete [] payload_out;
     delete [] key_out;
   }
@@ -102,8 +105,11 @@ struct ScalarContext {
   float_t lower_bound;
   float_t upper_bound;
 
-  int32_t* key_in;
-  float_t* payload_in;
+//  int32_t* key_in;
+//  float_t* payload_in;
+
+  std::shared_ptr<MMapFile> key_mm;
+  std::shared_ptr<MMapFile> payload_mm;
 
   int32_t* key_out;
   float_t* payload_out;
@@ -111,8 +117,8 @@ struct ScalarContext {
 
 auto scalar_branch(std::shared_ptr<ScalarContext> context) -> size_t {
   size_t input_num = context->input_num;
-  int32_t* key_in = context->key_in;
-  float_t* payload_in = context->payload_in;
+  int32_t* key_in = reinterpret_cast<int32_t*>(context->key_mm->mm);
+  float_t* payload_in = reinterpret_cast<float_t*>(context->payload_mm->mm);
   double_t lower_bound = context->lower_bound;
   double_t upper_bound = context->upper_bound;
   int32_t* key_out = context->key_out;
@@ -135,8 +141,8 @@ auto scalar_branch(std::shared_ptr<ScalarContext> context) -> size_t {
 
 auto scalar_branchless(std::shared_ptr<ScalarContext> context) -> size_t {
   size_t input_num = context->input_num;
-  int32_t* key_in = context->key_in;
-  float_t* payload_in = context->payload_in;
+  int32_t* key_in = reinterpret_cast<int32_t*>(context->key_mm->mm);
+  float_t* payload_in = reinterpret_cast<float_t*>(context->payload_mm->mm);
   double_t lower_bound = context->lower_bound;
   double_t upper_bound = context->upper_bound;
   int32_t* key_out = context->key_out;
@@ -267,8 +273,8 @@ auto run_vector(std::shared_ptr<ScalarContext> context) -> size_t {
   // early vs late materialization
 
   size_t input_num = context->input_num;
-  int32_t* key_in = context->key_in;
-  float_t* payload_in = context->payload_in;
+  int32_t* key_in = reinterpret_cast<int32_t*>(context->key_mm->mm);
+  float_t* payload_in = reinterpret_cast<float_t*>(context->payload_mm->mm);
   float_t lower_bound = context->lower_bound;
   float_t upper_bound = context->upper_bound;
 
